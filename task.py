@@ -3,6 +3,7 @@ import requests
 import json
 
 from db import db
+from util import upload_qiniu, get_img
 
 broker = 'redis://localhost:6379'
 backend = 'redis://localhost:6379'
@@ -20,10 +21,10 @@ def ip(self, ip):
             return '[fail]'
         else :
             update('ip', {'query':html.get('query', '')}, html)
+            print(html)
             return '[ok]'
 
     except requests.ConnectionError as e:
-        return 'celery error'
         with open('log.txt', 'w') as fp:
             fp.write(ip+'...ConnectionError\n')
 
@@ -38,11 +39,16 @@ def history(self, date):
 
         if r.json():
             for tmp in r.json():
+                filename = get_img(tmp.get('thumb', ''))
+                info = upload_qiniu(filename)
+                print(filename)
+                # filename = qiniu_upload.delay(tmp)
+
                 events.append(dict(
                     title = tmp.get('title', ''),
                     solaryear = tmp.get('solaryear', ''),
                     description = tmp.get('description', ''),
-                    thumb = tmp.get('thumb', '')
+                    thumb = filename
                 ))
 
             data = dict(
@@ -51,18 +57,21 @@ def history(self, date):
                 day = date[1]
             )
 
-            print(data)
-            update('history', {'month':data['month'], 'day':data['day']}, data)
+            update('history', {'month':data['month'], 'day':data['day']}, data, force=True)
             return '[ok]'
         else:
             return '[failed]'
-
-
     except requests.ConnectionError as e:
         raise self.retry(exc=e, countdown=5, max_retries=10)
 
+@app.task(bind=True)
+def qiniu_upload(self, tmp):
+    filename = get_img(tmp.get('thumb', ''))
+    info = upload_qiniu(filename)
+    return filename
 
-def update(type_, query, data):
+
+def update(type_, query, data, force=False):
     '''
     当数据不存在时,更新 mongodb 数据库
         type_ : 类型
@@ -72,5 +81,10 @@ def update(type_, query, data):
     database = db[type_]
     if isinstance(data, str):
         data = json.loads(data)
+
     if database.find_one(query) is None:
+        print("insert database")
         database.insert_one(data)
+    else:
+        print("update database")
+        database.find_one_and_update(query, {'$set':data})

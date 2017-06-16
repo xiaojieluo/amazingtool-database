@@ -21,7 +21,6 @@ if os.path.isfile(ip_file):
 
 for a in range(1, 256):
     if a < last_ip[0]: continue
-    # last_ip[0] = 1
 
     for b in range(0, 256):
         if b < last_ip[1]:
